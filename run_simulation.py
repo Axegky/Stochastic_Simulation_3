@@ -8,7 +8,7 @@ from SA import SA
 def seed():
     np.random.seed(42)
 
-def run_multiple_simulation(dimension=51, num_i=1000, num_run=50, MC_length=1, alg_type='SA', SA_type='geo', temperature=1, save_file=None, load_file=None): 
+def run_multiple_simulation(dimension=51, num_i=1000, num_run=50, alg_type='SA', SA_type='geo', temperature=1, MC_length=1, save_file=None, load_file=None): 
     
     seed()
     results = np.zeros((num_run, num_i))
@@ -24,14 +24,23 @@ def run_multiple_simulation(dimension=51, num_i=1000, num_run=50, MC_length=1, a
             return results, route
 
         if SA_type == 'lin': 
-            for i in range(num_run): 
-                    results[i,:], route = SA(dimension, num_i, temperature, MC_length).run_simulation_sa_lin()
+            with ProcessPoolExecutor() as executor:
+                futures = []
+                for i in range(num_run): 
+                        futures.append(executor.submit(SA(dimension, num_i, temperature, MC_length).run_simulation_sa_lin))
+                # results[i,:], route = SA(dimension, num_i, temperature, MC_length).run_simulation_sa_lin()
         elif SA_type == 'geo': 
-            for i in range(num_run): 
-                results[i,:], route = SA(dimension, num_i, temperature, MC_length).run_simulation_sa_geo()
+            with ProcessPoolExecutor() as executor:
+                futures = []
+                for i in range(num_run): 
+                        futures.append(executor.submit(SA(dimension, num_i, temperature, MC_length).run_simulation_sa_geo))
+                # results[i,:], route = SA(dimension, num_i, temperature, MC_length).run_simulation_sa_geo()
         elif SA_type == 'log': 
-            for i in range(num_run): 
-                    results[i,:], route = SA(dimension, num_i, temperature, MC_length).run_simulation_sa_log()
+            with ProcessPoolExecutor() as executor:
+                futures = []
+                for i in range(num_run): 
+                        futures.append(executor.submit(SA(dimension, num_i, temperature, MC_length).run_simulation_sa_log))
+                # results[i,:], route = SA(dimension, num_i, temperature, MC_length).run_simulation_sa_log()
     
     elif alg_type == 'HC':
 
@@ -63,5 +72,5 @@ def run_multiple_simulation(dimension=51, num_i=1000, num_run=50, MC_length=1, a
 
 if __name__ == '__main__':
 
-    results_hc, route = run_multiple_simulation(dimension=51, num_i=1000000, num_run=50, alg_type='HC', save_file=True)
-    print(results_hc[:,-1])
+    results_sa_geo, route = run_multiple_simulation(dimension=51, num_i=100000, num_run=50, alg_type='SA')
+    print(results_sa_geo[:,-1])
