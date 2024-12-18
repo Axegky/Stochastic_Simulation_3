@@ -2,13 +2,13 @@ import numpy as np
 import pandas as pd
 import pickle
 import tsplib95
-import concurrent.futures
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from SA import SA
 
 def seed():
     np.random.seed(42)
 
-def run_multiple_simulation(dimension=51, temperature=1, num_i=1000, num_run=50, MC_length=1, alg_type='SA', SA_type='geo', save_file=None, load_file=None): 
+def run_multiple_simulation(dimension=51, num_i=1000, num_run=50, MC_length=1, alg_type='SA', SA_type='geo', temperature=1, save_file=None, load_file=None): 
     
     seed()
     results = np.zeros((num_run, num_i))
@@ -41,10 +41,17 @@ def run_multiple_simulation(dimension=51, temperature=1, num_i=1000, num_run=50,
                 results = pickle.load(f)
             with open(f'data/{file_prefix}_route.pkl', 'rb') as f:
                 route = pickle.load(f)
+            return results, route
 
-        for i in range(num_run): 
-                results[i,:], route = SA(dimension, temperature, num_i).run_simulation_hc()
-    
+        with ProcessPoolExecutor() as executor:
+            futures = []
+            for i in range(num_run): 
+                futures.append(executor.submit(SA(dimension, num_i, temperature).run_simulation_hc))
+            for i, future in enumerate(as_completed(futures)):
+                try:
+                    results[i], route = future.result()
+                except Exception as e:
+                    print(f"Simulation {i} failed with error: {e}")
     if save_file: 
         with open(f'data/{file_prefix}_results.pkl', 'wb') as f: 
              pickle.dump(results, f)
@@ -56,5 +63,5 @@ def run_multiple_simulation(dimension=51, temperature=1, num_i=1000, num_run=50,
 
 if __name__ == '__main__':
 
-    results, route = run_multiple_simulation(dimension=51, temperature=1, num_i=1000, num_run=50)
-    print(results[:,-1])
+    results_hc, route = run_multiple_simulation(dimension=51, num_i=1000000, num_run=50, alg_type='HC', save_file=True)
+    print(results_hc[:,-1])
