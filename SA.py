@@ -1,6 +1,4 @@
 import numpy as np
-import pandas as pd
-import pickle
 import tsplib95
 
 def load_file(file_path): 
@@ -19,7 +17,7 @@ class SA():
             self.x_coordinates, self.y_coordinates = load_file("TSP-Configurations\eil51.tsp.txt")
         elif dimension == 280:
             self.dimension = 280
-            self.x_coordinates, self.y_coordinates = load_file("TSP-Configurations\a280.tsp.txt")
+            self.x_coordinates, self.y_coordinates = load_file("TSP-Configurations/a280.tsp.txt")
         elif dimension == 442: 
             self.dimension = 442
             self.x_coordinates, self.y_coordinates = load_file("TSP-Configurations\pcb442.tsp.txt")
@@ -31,8 +29,10 @@ class SA():
         self.distance_matrix = self.get_distance_matrix()
         self.distance = self.get_distance(self.route)
         self.T = temperature
-        self.coef_cooling_lin = temperature * (1 - 0.9 ** num_i) / num_i
-        self.coef_cooling_log = np.log(2)
+        num_cooling = temperature / MC_length
+        self.coef_cooling_lin = num_cooling / num_i
+        self.coef_cooling_geo = num_i / -np.log(1/(num_cooling*10**6))
+        self.coef_cooling_inv = -num_i / np.log(1/(num_cooling*10**6))
         self.num_i = num_i
         self.MC_length = MC_length
         self.rng = np.random.default_rng()
@@ -77,25 +77,28 @@ class SA():
         self.T -= self.coef_cooling_lin
 
     def cooling_schedule_geo(self): 
-        self.T *= 0.9
+        self.T *= np.exp(-1/self.coef_cooling_geo)
 
-    def cooling_schedule_log(self): 
-        self.current_iteration += 1
-        self.T = self.coef_cooling_log / np.log(1+self.current_iteration)
+    def cooling_schedule_inv(self, counter_cooling): 
+        self.T *= (1+self.coef_cooling_inv*counter_cooling) / (1+self.coef_cooling_inv*counter_cooling+self.coef_cooling_inv)
 
     def run_simulation_sa_lin(self): 
         distance_list = np.zeros(self.num_i)
+        counter = 1
         for i in range(self.num_i): 
             new_route, new_distance = self.two_opt()
             self.acceptance_criteria_sa(new_route, new_distance)
-            self.cooling_schedule_lin()
+            if counter == self.MC_length: 
+                self.cooling_schedule_lin()
+                counter = 0
             distance_list[i] = self.distance
+            counter += 1
         
         return distance_list, self.route
     
     def run_simulation_sa_geo(self): 
         distance_list = np.zeros(self.num_i)
-        counter = 0
+        counter = 1
         for i in range(self.num_i): 
             new_route, new_distance = self.two_opt()
             self.acceptance_criteria_sa(new_route, new_distance)
@@ -104,21 +107,24 @@ class SA():
                 counter = 0
             distance_list[i] = self.distance
             counter += 1
-        
+
         return distance_list, self.route
     
-    def run_simulation_sa_log(self): 
+    def run_simulation_sa_inv(self): 
         distance_list = np.zeros(self.num_i)
-        counter = 0
+        counter = 1
+        counter_cooling = 0
         self.current_iteration = 0
         for i in range(self.num_i): 
             new_route, new_distance = self.two_opt()
             self.acceptance_criteria_sa(new_route, new_distance)
             if counter == self.MC_length: 
-                self.cooling_schedule_log()
+                self.cooling_schedule_inv(counter_cooling)
+                counter_cooling += 1
                 counter = 0
             distance_list[i] = self.distance
-        
+            counter += 1
+
         return distance_list, self.route
     
     def run_simulation_hc(self): 

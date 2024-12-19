@@ -1,7 +1,5 @@
 import numpy as np
-import pandas as pd
 import pickle
-import tsplib95
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from SA import SA
 
@@ -28,19 +26,34 @@ def run_multiple_simulation(dimension=51, num_i=1000, num_run=50, alg_type='SA',
                 futures = []
                 for i in range(num_run): 
                         futures.append(executor.submit(SA(dimension, num_i, temperature, MC_length).run_simulation_sa_lin))
-                # results[i,:], route = SA(dimension, num_i, temperature, MC_length).run_simulation_sa_lin()
+                for i, future in enumerate(as_completed(futures)):
+                    try:
+                        results[i], route = future.result()
+                    except Exception as e:
+                        print(f"Simulation {i} failed with error: {e}")
+                    # results[i,:], route = SA(dimension, num_i, temperature, MC_length).run_simulation_sa_lin()
         elif SA_type == 'geo': 
             with ProcessPoolExecutor() as executor:
                 futures = []
                 for i in range(num_run): 
                         futures.append(executor.submit(SA(dimension, num_i, temperature, MC_length).run_simulation_sa_geo))
-                # results[i,:], route = SA(dimension, num_i, temperature, MC_length).run_simulation_sa_geo()
-        elif SA_type == 'log': 
+                for i, future in enumerate(as_completed(futures)):
+                    try:
+                        results[i], route = future.result()
+                    except Exception as e:
+                        print(f"Simulation {i} failed with error: {e}")
+                    # results[i,:], route = SA(dimension, num_i, temperature, MC_length).run_simulation_sa_geo()
+        elif SA_type == 'inv': 
             with ProcessPoolExecutor() as executor:
                 futures = []
                 for i in range(num_run): 
-                        futures.append(executor.submit(SA(dimension, num_i, temperature, MC_length).run_simulation_sa_log))
-                # results[i,:], route = SA(dimension, num_i, temperature, MC_length).run_simulation_sa_log()
+                        futures.append(executor.submit(SA(dimension, num_i, temperature, MC_length).run_simulation_sa_inv))
+                for i, future in enumerate(as_completed(futures)):
+                    try:
+                        results[i], route = future.result()
+                    except Exception as e:
+                        print(f"Simulation {i} failed with error: {e}")
+                    # results[i,:], route = SA(dimension, num_i, temperature, MC_length).run_simulation_sa_inv()
     
     elif alg_type == 'HC':
 
@@ -72,5 +85,6 @@ def run_multiple_simulation(dimension=51, num_i=1000, num_run=50, alg_type='SA',
 
 if __name__ == '__main__':
 
-    results_sa_geo, route = run_multiple_simulation(dimension=51, num_i=100000, num_run=50, alg_type='SA')
-    print(results_sa_geo[:,-1])
+    # results_hc, route = run_multiple_simulation(dimension=442, num_i=1000000, num_run=50, alg_type='HC', save_file=True)
+    results_sa, route = run_multiple_simulation(dimension=442, num_i=1000000, num_run=50, temperature=1, alg_type='SA', SA_type='geo', save_file=True)
+    print(results_sa[:,-1])
