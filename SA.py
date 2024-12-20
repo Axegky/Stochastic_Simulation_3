@@ -32,12 +32,8 @@ class SA():
         self.initial_T = initial_temperature
         self.error = error
         self.num_i = num_i
-        self.MC_lengths = MC_lengths
         self.distance_matrix = self.__get_distance_matrix()
 
-        num_cooling = num_i / MC_lengths
-        self.num_diff_MC_lengths = len(MC_lengths)
-        self.num_schedules = 4
         self.nodes = range(self.dimension)
 
         self.rng = np.random.default_rng(seed=seed)
@@ -48,6 +44,10 @@ class SA():
         self.exchange_pos = np.sort([np.random.choice(self.nodes, size=2, replace=False) for _ in range(num_i+1)]).astype(np.int16)
 
         if not no_SA:
+            self.MC_lengths = MC_lengths
+            num_cooling = num_i / MC_lengths
+            self.num_diff_MC_lengths = len(MC_lengths)
+            self.num_schedules = 4
             self.Ts = np.zeros((self.num_schedules, self.num_diff_MC_lengths, self.num_i+1), dtype=np.float16)
             xs = np.tile(np.arange(num_i+1), (self.num_diff_MC_lengths, 1))
             xs = np.floor(xs/MC_lengths[:, np.newaxis])
@@ -61,26 +61,27 @@ class SA():
             self.Ts[3] = self.gen_cooling_schedule_inv(xs)
 
     def __get_distance_matrix(self): 
-        distance_matrix = np.zeros((self.dimension, self.dimension))
-        for i in range(self.dimension): 
-            distance_matrix[i] = (self.x_coordinates - self.x_coordinates[i])**2
-            distance_matrix[i] += (self.y_coordinates - self.y_coordinates[i])**2
-        
-        return np.sqrt(distance_matrix)
+        coordinates = np.vstack((self.x_coordinates, self.y_coordinates)).T
+        return np.sqrt(np.sum((coordinates[:, np.newaxis, :] - coordinates[np.newaxis, :, :]) ** 2, axis=2))
     
     def __get_distance(self, route):
-        reshape_route = np.array((route[:-1], route[1:])).T
-        reshape_route = np.vstack((reshape_route, np.array([[route[-1], route[0]]])))
-        return self.distance_matrix[reshape_route[:, 0], reshape_route[:, 1]].sum()
-
+        return self.distance_matrix[route, np.append(route[1:], route[0])].sum()
+    
     def __get_distances(self, routes):
         """Get distances for multiple route"""
-        new_distances = np.zeros(routes.shape[:2])
-        for schedule_idx, route_per_MC_length in enumerate(routes):
-            for MC_length_idx, route in enumerate(route_per_MC_length):
-                new_distances[schedule_idx, MC_length_idx] = self.__get_distance(route)
+        end_points = np.concatenate((routes[:, :, 1:], routes[:, :, 0, None]), axis=-1)
+        new_distances = self.distance_matrix[routes.flatten(), end_points.flatten()].reshape(routes.shape).sum(axis=-1)
 
         return new_distances
+
+    # def __get_distances(self, routes):
+    #     """Get distances for multiple route"""
+    #     new_distances = np.zeros(routes.shape[:-1])
+    #     for schedule_idx, route_per_MC_length in enumerate(routes):
+    #         for MC_length_idx, route in enumerate(route_per_MC_length):
+    #             new_distances[schedule_idx, MC_length_idx] = self.__get_distance(route)
+
+    #     return new_distances
     
     def __two_opt(self, route, i):
         """Change single route."""
@@ -94,25 +95,13 @@ class SA():
     def __two_opts(self, routes, i):
         """Change multiple routes."""
         position_1, position_2 = self.exchange_pos[i]
-        routes[:, :, position_1:position_2+1] = routes[:, :, np.arange(position_2, position_1-1, -1)]
-        new_distances = self.__get_distances(routes) 
+        new_routes = routes.copy()
+        new_routes[:, :, position_1:position_2+1] = routes[:, :, np.arange(position_2, position_1-1, -1)]
+        new_distances = self.__get_distances(new_routes) 
 
-        return routes, new_distances
+        return new_routes, new_distances
 
     def __acceptance_criteria_sa(self, new_routes, new_distances, current_routes, current_distances, i):
-        # with warnings.catch_warnings():
-        # try:
-        #     np.seterr(over='raise')
-        # if new_distances[0, 0] < current_distances[0, 0]:
-        #     print(f'1: {new_distances[:,:]}')
-        #     print(f'2: {current_distances[:,:]}')
-
-        # probability = np.exp(np.minimum(-(new_distances-current_distances)/self.Ts[:, :, i], 0))
-        # except FloatingPointError as e:
-        #     # print(e)
-        #     print(f'1-{i}: {new_distances-current_distances}')
-        #     print(f'2-{i}: {self.Ts[:, :, i]}')
-        #     print(f'3-{i}: {-(new_distances-current_distances)/self.Ts[:, :, i]}')
         mask = (self.random_numbers[i] <= np.exp(np.minimum(-(new_distances-current_distances)/self.Ts[:, :, i], 0)))
         current_routes[mask] = new_routes[mask]
         current_distances[mask] = new_distances[mask]
@@ -131,7 +120,7 @@ class SA():
         current_distances = self.__get_distances(current_routes)
         distances_list = np.zeros((self.num_schedules, self.num_diff_MC_lengths, self.num_i+1))
 
-        for i in range(self.num_i+1): 
+        for i in range(self.num_i+1):
             new_routes, new_distances = self.__two_opts(current_routes, i)
             current_routes, current_distances = self.__acceptance_criteria_sa(new_routes, new_distances, current_routes, current_distances, i)
             distances_list[:, :, i] = current_distances
@@ -165,4 +154,4 @@ class SA():
     
 if __name__=='__main__':
     sa = SA(51, 1)
-    print(sa.exchange_pos)
+    print(sa.run_simulation_sa()[0])
