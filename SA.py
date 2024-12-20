@@ -45,7 +45,7 @@ class SA():
         self.random_numbers = self.rng.random(num_i+1).astype(np.float16)
 
         set_seed(seed)
-        self.exchange_pos = np.sort([np.random.choice(self.nodes, size=2, replace=False) for _ in range(num_i+1)]).astype(np.uint16)
+        self.exchange_pos = np.sort([np.random.choice(self.nodes, size=2, replace=False) for _ in range(num_i+1)]).astype(np.int16)
 
         if not no_SA:
             self.Ts = np.zeros((self.num_schedules, self.num_diff_MC_lengths, self.num_i+1), dtype=np.float16)
@@ -85,10 +85,11 @@ class SA():
     def __two_opt(self, route, i):
         """Change single route."""
         position_1, position_2 = self.exchange_pos[i]
-        route[position_1:position_2+1] = route[np.arange(position_2, position_1-1, -1)]
-        new_distance = self.__get_distance(route) 
+        new_route = route.copy()
+        new_route[position_1:position_2+1] = route[np.arange(position_2, position_1-1, -1)]
+        new_distance = self.__get_distance(new_route) 
 
-        return route, new_distance
+        return new_route, new_distance
 
     def __two_opts(self, routes, i):
         """Change multiple routes."""
