@@ -1,5 +1,6 @@
 import numpy as np
 import tsplib95
+import warnings
 
 def load_file(file_path): 
     '''Load the coordinates of each dimension.'''
@@ -11,7 +12,7 @@ def load_file(file_path):
     return np.array(x_coordinates), np.array(y_coordinates)
 
 class SA(): 
-    def __init__(self, dimension, num_i, temperature=1, MC_length=1):
+    def __init__(self, dimension, num_i=int(10e5), initial_temperature=1, MC_lengths=np.array([1, 50, 100]), error=1e-4):
         if dimension == 51: 
             self.dimension = 51
             self.x_coordinates, self.y_coordinates = load_file("TSP-Configurations\eil51.tsp.txt")
@@ -24,20 +25,36 @@ class SA():
         else: 
             raise ValueError('No such file')
         
-        rng = np.random.default_rng()
-        self.route = rng.choice(range(self.dimension), size=self.dimension, replace=False)
-        self.distance_matrix = self.get_distance_matrix()
-        self.distance = self.get_distance(self.route)
-        self.T = temperature
-        num_cooling = temperature / MC_length
-        self.coef_cooling_lin = num_cooling / num_i
-        self.coef_cooling_geo = num_i / -np.log(1/(num_cooling*10**6))
-        self.coef_cooling_inv = -num_i / np.log(1/(num_cooling*10**6))
+        self.initial_T = initial_temperature
+        self.error = error
         self.num_i = num_i
-        self.MC_length = MC_length
-        self.rng = np.random.default_rng()
+        self.MC_lengths = MC_lengths
 
-    def get_distance_matrix(self): 
+        num_cooling = num_i / MC_lengths
+        self.num_diff_MC_lengths = len(MC_lengths)
+        self.num_schedules = 4
+
+        self.rng = np.random.default_rng()
+        self.initial_route = self.rng.choice(range(self.dimension), size=self.dimension, replace=False)
+        self.distance_matrix = self.__get_distance_matrix()
+
+        self.Ts = np.zeros((self.num_schedules, self.num_diff_MC_lengths, self.num_i+1))
+        xs = np.tile(np.arange(num_i+1), (self.num_diff_MC_lengths, 1))
+        xs = np.floor(xs/MC_lengths[:, np.newaxis])
+
+        self.coef_cooling_lin = (self.initial_T-error) / num_cooling
+        self.coef_cooling_geo = - num_cooling / np.log(error/self.initial_T)
+        self.coef_cooling_inv = (self.initial_T/error - 1)/num_cooling
+        self.Ts[0] = self.gen_cooling_schedule_lin(xs)
+        self.Ts[1] = self.gen_cooling_schedule_geo(xs)
+        self.Ts[2] = 0.5*self.Ts[0] + 0.5*self.Ts[1]
+        self.Ts[3] = self.gen_cooling_schedule_inv(xs)
+
+        self.exchange_pos = np.sort([self.rng.choice(range(self.dimension), size=2, replace=False) for _ in range(num_i+1)])
+        self.random_numbers = self.rng.random(num_i+1)
+        self.zeros = np.zeros((self.num_schedules, self.num_diff_MC_lengths))
+
+    def __get_distance_matrix(self): 
         distance_matrix = np.zeros((self.dimension, self.dimension))
         for i in range(self.dimension): 
             distance_matrix[i] = (self.x_coordinates - self.x_coordinates[i])**2
@@ -45,94 +62,95 @@ class SA():
         
         return np.sqrt(distance_matrix)
     
-    def get_distance(self, route):
+    def __get_distance(self, route):
         reshape_route = np.array((route[:-1], route[1:])).T
         reshape_route = np.vstack((reshape_route, np.array([[route[-1], route[0]]])))
 
         return self.distance_matrix[reshape_route[:, 0], reshape_route[:, 1]].sum()
+
+    def __get_distances(self, routes):
+        """Get distances for multiple route"""
+        new_distances = np.zeros(routes.shape[:2])
+        for schedule_idx, route_per_MC_length in enumerate(routes):
+            for MC_length_idx, route in enumerate(route_per_MC_length):
+                new_distances[schedule_idx, MC_length_idx] = self.__get_distance(route)
+
+        return new_distances
     
-    def two_opt(self): 
-        position_1, position_2 = np.sort(self.rng.choice(range(self.dimension), size=2, replace=False))
-        new_route = np.copy(self.route)
-        new_route[position_1:position_2+1] = self.route[np.arange(position_2, position_1-1, -1)]
-        new_distance = self.get_distance(new_route) 
+    def __two_opt(self, route, i):
+        """Change single route."""
+        position_1, position_2 = self.exchange_pos[i]
+        route[position_1:position_2+1] = route[np.arange(position_2, position_1-1, -1)]
+        new_distance = self.__get_distance(route) 
 
-        return new_route, new_distance
+        return route, new_distance
 
-    def acceptance_criteria_sa(self, new_route, new_distance): 
-        '''acceptance criteria for simulated annealing algorithm'''
-        random = np.random.rand()
-        if random <= min(np.exp(-(new_distance-self.distance)/self.T),1): 
-            self.route = new_route
-            self.distance = new_distance
+    def __two_opts(self, routes, i):
+        """Change multiple routes."""
+        position_1, position_2 = self.exchange_pos[i]
+        routes[:, :, position_1:position_2+1] = routes[:, :, np.arange(position_2, position_1-1, -1)]
+        new_distances = self.__get_distances(routes) 
 
-    def acceptance_criteria_hc(self, new_route, new_distance): 
+        return routes, new_distances
+
+    def __acceptance_criteria_sa(self, new_routes, new_distances, current_routes, current_distances, i):
+        # with warnings.catch_warnings():
+        # try:
+        #     np.seterr(over='raise')
+        probability = np.exp(np.minimum(-(new_distances-current_distances)/self.Ts[:, :, i], self.zeros))
+        # except FloatingPointError as e:
+        #     # print(e)
+        #     print(f'1-{i}: {new_distances-current_distances}')
+        #     print(f'2-{i}: {self.Ts[:, :, i]}')
+        #     print(f'3-{i}: {-(new_distances-current_distances)/self.Ts[:, :, i]}')
+        mask = (self.random_numbers[i] <= probability)
+        current_routes[mask] = new_routes[mask]
+        current_distances[mask] = new_distances[mask]
+
+        return current_routes, current_distances
+
+    def __acceptance_criteria_hc(self, new_route, new_distance, current_route, current_distance): 
         '''acceptance criteria for hill climbing algorithm'''
-        if new_distance < self.distance:
-            self.route = new_route
-            self.distance = new_distance
-
-    def cooling_schedule_lin(self): 
-        # Balance the temperature after num_i iterations of linear and geometric cooling schedules
-        self.T -= self.coef_cooling_lin
-
-    def cooling_schedule_geo(self): 
-        self.T *= np.exp(-1/self.coef_cooling_geo)
-
-    def cooling_schedule_inv(self, counter_cooling): 
-        self.T *= (1+self.coef_cooling_inv*counter_cooling) / (1+self.coef_cooling_inv*counter_cooling+self.coef_cooling_inv)
-
-    def run_simulation_sa_lin(self): 
-        distance_list = np.zeros(self.num_i)
-        counter = 1
-        for i in range(self.num_i): 
-            new_route, new_distance = self.two_opt()
-            self.acceptance_criteria_sa(new_route, new_distance)
-            if counter == self.MC_length: 
-                self.cooling_schedule_lin()
-                counter = 0
-            distance_list[i] = self.distance
-            counter += 1
+        if new_distance < current_distance:
+            current_route = new_route
+            current_distance = new_distance
         
-        return distance_list, self.route
-    
-    def run_simulation_sa_geo(self): 
-        distance_list = np.zeros(self.num_i)
-        counter = 1
-        for i in range(self.num_i): 
-            new_route, new_distance = self.two_opt()
-            self.acceptance_criteria_sa(new_route, new_distance)
-            if counter == self.MC_length: 
-                self.cooling_schedule_geo()
-                counter = 0
-            distance_list[i] = self.distance
-            counter += 1
+        return current_route, current_distance
 
-        return distance_list, self.route
-    
-    def run_simulation_sa_inv(self): 
-        distance_list = np.zeros(self.num_i)
-        counter = 1
-        counter_cooling = 0
-        self.current_iteration = 0
-        for i in range(self.num_i): 
-            new_route, new_distance = self.two_opt()
-            self.acceptance_criteria_sa(new_route, new_distance)
-            if counter == self.MC_length: 
-                self.cooling_schedule_inv(counter_cooling)
-                counter_cooling += 1
-                counter = 0
-            distance_list[i] = self.distance
-            counter += 1
+    def run_simulation_sa(self): 
+        current_routes = np.tile(self.initial_route, (self.num_schedules, self.num_diff_MC_lengths, 1))
+        current_distances = self.__get_distances(current_routes)
+        distances_list = np.zeros((self.num_schedules, self.num_diff_MC_lengths, self.num_i+1))
 
-        return distance_list, self.route
+        for i in range(self.num_i+1): 
+            new_routes, new_distances = self.__two_opts(current_routes, i)
+            current_routes, current_distances = self.__acceptance_criteria_sa(new_routes, new_distances, current_routes, current_distances, i)
+            
+            distances_list[:, :, i] = current_distances
+    
+        return distances_list, current_routes
     
     def run_simulation_hc(self): 
-        distance_list = np.zeros(self.num_i)
-        for i in range(self.num_i): 
-            new_route, new_distance = self.two_opt()
-            self.acceptance_criteria_hc(new_route, new_distance)
-            distance_list[i] = self.distance
+        current_route = self.initial_route
+        current_distance = self.__get_distance(current_route)
+        distance_list = np.zeros((self.num_i+1))
+
+        for i in range(self.num_i+1): 
+            new_route, new_distance = self.__two_opt(current_route, i)
+            current_route, current_distance = self.__acceptance_criteria_hc(new_route, new_distance, current_route, current_distance)
+
+            distance_list[i] = current_distance
         
-        return distance_list, self.route
+        return distance_list, current_route
     
+    def gen_cooling_schedule_lin(self, xs): 
+        
+        return self.initial_T - self.coef_cooling_lin[:, np.newaxis]*xs
+    
+    def gen_cooling_schedule_geo(self, xs): 
+
+        return self.initial_T * np.exp(-xs/self.coef_cooling_geo[:, np.newaxis])
+
+    def gen_cooling_schedule_inv(self, xs): 
+
+        return self.initial_T * (1/(1+self.coef_cooling_inv[:, np.newaxis]*xs))
