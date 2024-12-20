@@ -11,8 +11,12 @@ def load_file(file_path):
     
     return np.array(x_coordinates), np.array(y_coordinates)
 
+def set_seed(seed=42):
+    np.random.seed(seed)
+
 class SA(): 
-    def __init__(self, dimension, num_i=int(10e5), initial_temperature=1, MC_lengths=np.array([1, 50, 100]), error=1e-4):
+    def __init__(self, dimension, seed, num_i=int(10e5), initial_temperature=1, MC_lengths=np.array([1, 50, 100]), error=1e-4, no_SA=False):
+
         if dimension == 51: 
             self.dimension = 51
             self.x_coordinates, self.y_coordinates = load_file("TSP-Configurations\eil51.tsp.txt")
@@ -29,30 +33,32 @@ class SA():
         self.error = error
         self.num_i = num_i
         self.MC_lengths = MC_lengths
+        self.distance_matrix = self.__get_distance_matrix()
 
         num_cooling = num_i / MC_lengths
         self.num_diff_MC_lengths = len(MC_lengths)
         self.num_schedules = 4
+        self.nodes = range(self.dimension)
 
-        self.rng = np.random.default_rng()
-        self.initial_route = self.rng.choice(range(self.dimension), size=self.dimension, replace=False)
-        self.distance_matrix = self.__get_distance_matrix()
+        self.rng = np.random.default_rng(seed=seed)
+        self.initial_route = self.rng.choice(self.nodes, size=self.dimension, replace=False).astype(np.uint16)
+        self.random_numbers = self.rng.random(num_i+1).astype(np.float16)
 
-        self.Ts = np.zeros((self.num_schedules, self.num_diff_MC_lengths, self.num_i+1))
-        xs = np.tile(np.arange(num_i+1), (self.num_diff_MC_lengths, 1))
-        xs = np.floor(xs/MC_lengths[:, np.newaxis])
+        set_seed(seed)
+        self.exchange_pos = np.sort([np.random.choice(self.nodes, size=2, replace=False) for _ in range(num_i+1)]).astype(np.uint16)
 
-        self.coef_cooling_lin = (self.initial_T-error) / num_cooling
-        self.coef_cooling_geo = - num_cooling / np.log(error/self.initial_T)
-        self.coef_cooling_inv = (self.initial_T/error - 1)/num_cooling
-        self.Ts[0] = self.gen_cooling_schedule_lin(xs)
-        self.Ts[1] = self.gen_cooling_schedule_geo(xs)
-        self.Ts[2] = 0.5*self.Ts[0] + 0.5*self.Ts[1]
-        self.Ts[3] = self.gen_cooling_schedule_inv(xs)
+        if not no_SA:
+            self.Ts = np.zeros((self.num_schedules, self.num_diff_MC_lengths, self.num_i+1), dtype=np.float16)
+            xs = np.tile(np.arange(num_i+1), (self.num_diff_MC_lengths, 1))
+            xs = np.floor(xs/MC_lengths[:, np.newaxis])
 
-        self.exchange_pos = np.sort([self.rng.choice(range(self.dimension), size=2, replace=False) for _ in range(num_i+1)])
-        self.random_numbers = self.rng.random(num_i+1)
-        self.zeros = np.zeros((self.num_schedules, self.num_diff_MC_lengths))
+            self.coef_cooling_lin = (self.initial_T-error) / num_cooling
+            self.coef_cooling_geo = - num_cooling / np.log(error/self.initial_T)
+            self.coef_cooling_inv = (self.initial_T/error - 1)/num_cooling
+            self.Ts[0] = self.gen_cooling_schedule_lin(xs)
+            self.Ts[1] = self.gen_cooling_schedule_geo(xs)
+            self.Ts[2] = 0.5*self.Ts[0] + 0.5*self.Ts[1]
+            self.Ts[3] = self.gen_cooling_schedule_inv(xs)
 
     def __get_distance_matrix(self): 
         distance_matrix = np.zeros((self.dimension, self.dimension))
@@ -65,7 +71,6 @@ class SA():
     def __get_distance(self, route):
         reshape_route = np.array((route[:-1], route[1:])).T
         reshape_route = np.vstack((reshape_route, np.array([[route[-1], route[0]]])))
-
         return self.distance_matrix[reshape_route[:, 0], reshape_route[:, 1]].sum()
 
     def __get_distances(self, routes):
@@ -97,16 +102,19 @@ class SA():
         # with warnings.catch_warnings():
         # try:
         #     np.seterr(over='raise')
-        probability = np.exp(np.minimum(-(new_distances-current_distances)/self.Ts[:, :, i], self.zeros))
+        # if new_distances[0, 0] < current_distances[0, 0]:
+        #     print(f'1: {new_distances[:,:]}')
+        #     print(f'2: {current_distances[:,:]}')
+
+        # probability = np.exp(np.minimum(-(new_distances-current_distances)/self.Ts[:, :, i], 0))
         # except FloatingPointError as e:
         #     # print(e)
         #     print(f'1-{i}: {new_distances-current_distances}')
         #     print(f'2-{i}: {self.Ts[:, :, i]}')
         #     print(f'3-{i}: {-(new_distances-current_distances)/self.Ts[:, :, i]}')
-        mask = (self.random_numbers[i] <= probability)
+        mask = (self.random_numbers[i] <= np.exp(np.minimum(-(new_distances-current_distances)/self.Ts[:, :, i], 0)))
         current_routes[mask] = new_routes[mask]
         current_distances[mask] = new_distances[mask]
-
         return current_routes, current_distances
 
     def __acceptance_criteria_hc(self, new_route, new_distance, current_route, current_distance): 
@@ -125,7 +133,6 @@ class SA():
         for i in range(self.num_i+1): 
             new_routes, new_distances = self.__two_opts(current_routes, i)
             current_routes, current_distances = self.__acceptance_criteria_sa(new_routes, new_distances, current_routes, current_distances, i)
-            
             distances_list[:, :, i] = current_distances
     
         return distances_list, current_routes
@@ -154,3 +161,7 @@ class SA():
     def gen_cooling_schedule_inv(self, xs): 
 
         return self.initial_T * (1/(1+self.coef_cooling_inv[:, np.newaxis]*xs))
+    
+if __name__=='__main__':
+    sa = SA(51, 1)
+    print(sa.exchange_pos)
