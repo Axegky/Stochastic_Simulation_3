@@ -11,20 +11,24 @@ def run_sim_SA(i, dimension, num_i, initial_temperature, MC_lengths):
 def run_sim_HC(i, dimension, num_i):
     return SA(dimension, i, num_i, no_SA=True).run_simulation_hc()
 
+def load_files(file_prefix):
+    distances, routes = None, None
+    with open(f'data/{file_prefix}_distances.pkl', 'rb') as f:
+        distances = pickle.load(f)
+    with open(f'data/{file_prefix}_routes.pkl', 'rb') as f:
+        routes = pickle.load(f)
+
+    print('Successfully loaded data!')
+    return distances, routes
+
 def run_multiple_simulation(dimension=51, num_i=10, num_run=50, alg_type='SA', initial_temperature=1, MC_lengths=np.array([1, 50, 100]), save_file=None, load_file=None): 
-    
-    results_all = None
 
     print(f'Running Algorithm {alg_type}...')
     if alg_type == 'SA': 
 
         file_prefix = f'dimension_{dimension}_solved_by_SA_initial_temperature_{initial_temperature}_num_i_{num_i}_num_run_{num_run}'
         if load_file: 
-            with open(f'data/{file_prefix}_distances.pkl', 'rb') as f:
-                distances = pickle.load(f)
-            with open(f'data/{file_prefix}_routes.pkl', 'rb') as f:
-                routes = pickle.load(f)
-            return distances, routes
+            return load_files(file_prefix)
         
         num_MC_lengths = len(MC_lengths)
         num_schedules = 4
@@ -37,11 +41,7 @@ def run_multiple_simulation(dimension=51, num_i=10, num_run=50, alg_type='SA', i
     
         file_prefix = f'dimension_{dimension}_solved_by_HC_with_num_i_{num_i}_num_run_{num_run}'
         if load_file: 
-            with open(f'data/{file_prefix}_distances.pkl', 'rb') as f:
-                distances = pickle.load(f)
-            with open(f'data/{file_prefix}_routes.pkl', 'rb') as f:
-                routes = pickle.load(f)
-            return distances, routes
+            return load_files(file_prefix)
 
         distances = np.zeros((num_run, num_i+1))
         routes = np.zeros((num_run, dimension))
@@ -51,10 +51,12 @@ def run_multiple_simulation(dimension=51, num_i=10, num_run=50, alg_type='SA', i
     else:
         raise ValueError(f'No algo type as {alg_type}')
 
-    print('Starting Simulation SA...')
+    results_all = None
+
+    print('Starting Simulation...')
     with ProcessPoolExecutor(max_workers=10) as ex:
         results_all = list(ex.map(run_sim, range(num_run)))
-    print('Finished Simulation SA!')
+    print('Finished Simulation!')
 
     for n in range(num_run):
         distances[n] = results_all[n][0]
@@ -70,18 +72,21 @@ def run_multiple_simulation(dimension=51, num_i=10, num_run=50, alg_type='SA', i
 
 if __name__ == '__main__':
 
-    dim = 280
+    # dim = 280
     num_i = 1000000
     num_run = 50
-    results_hc, route = run_multiple_simulation(dimension=dim, num_i=num_i, num_run=num_run, alg_type='HC', save_file=True)
-    max_diff_dist = np.max((results_hc[:, :-1] - results_hc[:, 1:]).mean(axis=0))
-    initial_temps = [max_diff_dist/2, max_diff_dist, max_diff_dist*2]
-    for initial_temp in initial_temps:
-        run_multiple_simulation(dimension=dim, num_i=num_i, num_run=num_run, alg_type='SA', initial_temperature=initial_temp, save_file=True)
+    # results_hc, route = run_multiple_simulation(dimension=dim, num_i=num_i, num_run=num_run, alg_type='HC', save_file=True)
+    # max_diff_dist = np.max((results_hc[:, :-1] - results_hc[:, 1:]).mean(axis=0))
+    # initial_temps = [max_diff_dist/2, max_diff_dist, max_diff_dist*2]
+    # print(f'initial temperatures are {initial_temps}')
+    # for initial_temp in initial_temps:
+    #     run_multiple_simulation(dimension=dim, num_i=num_i, num_run=num_run, alg_type='SA', initial_temperature=initial_temp, save_file=True)
 
     dim = 442
     results_hc, route = run_multiple_simulation(dimension=dim, num_i=num_i, num_run=num_run, alg_type='HC', save_file=True)
     max_diff_dist = np.max((results_hc[:, :-1] - results_hc[:, 1:]).mean(axis=0))
     initial_temps = [max_diff_dist/2, max_diff_dist, max_diff_dist*2]
-    for initial_temp in initial_temps:
-        run_multiple_simulation(dimension=dim, num_i=num_i, num_run=num_run, alg_type='SA', initial_temperature=initial_temp, save_file=True)
+    print(f'initial temperatures are {initial_temps}')
+    run_multiple_simulation(dimension=dim, num_i=num_i, num_run=num_run, alg_type='SA', initial_temperature=initial_temps[2], save_file=True)
+    # for initial_temp in initial_temps:
+    #     run_multiple_simulation(dimension=dim, num_i=num_i, num_run=num_run, alg_type='SA', initial_temperature=initial_temp, save_file=True)
